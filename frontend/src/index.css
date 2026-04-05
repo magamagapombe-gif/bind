@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { box-sizing: border-box; }
+  body { font-family: 'Inter', system-ui, sans-serif; }
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-6 py-3 bg-flame text-white font-semibold rounded-2xl transition-all duration-200 active:scale-95 hover:bg-flame-dark disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 px-6 py-3 bg-white/10 text-white font-medium rounded-2xl transition-all duration-200 active:scale-95 hover:bg-white/20;
+  }
+  .card {
+    @apply bg-slate-800 rounded-3xl p-6 border border-slate-700;
+  }
+  .input {
+    @apply w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-3 text-white placeholder-slate-400 focus:outline-none focus:border-flame focus:ring-1 focus:ring-flame transition-colors;
+  }
+  .label {
+    @apply block text-sm font-medium text-slate-300 mb-1.5;
+  }
+}
+
+/* Swipe card drag animations */
+.swipe-card {
+  touch-action: none;
+  user-select: none;
+  will-change: transform;
+  transition: box-shadow 0.2s;
+}
+.swipe-card:active { box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
+
+/* Like / Nope overlay stamps */
+.stamp-like  { border: 4px solid #4ade80; color: #4ade80; transform: rotate(-20deg); }
+.stamp-nope  { border: 4px solid #f87171; color: #f87171; transform: rotate(20deg); }
