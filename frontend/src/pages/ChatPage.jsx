@@ -1,193 +1,231 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { api } from '../lib/api';
 import { supabase } from '../lib/supabase';
+import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import Spinner from '../components/Spinner';
 
-function timeStr(dateStr) {
-  return new Date(dateStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
 export default function ChatPage() {
-  const { matchId }  = useParams();
-  const { profile }  = useAuth();
-  const navigate     = useNavigate();
+  const { matchId } = useParams();
+  const { user }    = useAuth();
+  const navigate    = useNavigate();
 
-  const [messages, setMessages] = useState([]);
-  const [other, setOther]       = useState(null);
-  const [loading, setLoading]   = useState(true);
-  const [text, setText]         = useState('');
-  const [sending, setSending]   = useState(false);
-  const bottomRef = useRef(null);
+  const [messages, setMessages]     = useState([]);
+  const [other, setOther]           = useState(null);
+  const [text, setText]             = useState('');
+  const [loading, setLoading]       = useState(true);
+  const [isTyping, setIsTyping]     = useState(false);
+  const [showMenu, setShowMenu]     = useState(false);
+  const [sending, setSending]       = useState(false);
+  const bottomRef                   = useRef(null);
+  const typingTimeout               = useRef(null);
+  const presenceRef                 = useRef(null);
 
-  // Load messages and match info
-  const loadMessages = useCallback(async () => {
-    try {
-      const [msgs, matchData] = await Promise.all([
-        api.get(`/api/messages/${matchId}`),
-        api.get('/api/matches').then((list) => list.find((m) => m.id === matchId)),
-      ]);
-      setMessages(msgs);
-      if (matchData) setOther(matchData.match);
-    } catch (err) {
-      console.error(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [matchId]);
-
-  useEffect(() => { loadMessages(); }, [loadMessages]);
-
-  // Realtime subscription
   useEffect(() => {
-    const channel = supabase
-      .channel(`messages:${matchId}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages', filter: `match_id=eq.${matchId}` },
-        (payload) => {
-          setMessages((prev) => {
-            if (prev.find((m) => m.id === payload.new.id)) return prev;
-            return [...prev, payload.new];
-          });
-        }
-      )
-      .subscribe();
-
-    return () => supabase.removeChannel(channel);
+    init();
+    return () => {
+      presenceRef.current?.unsubscribe();
+    };
   }, [matchId]);
 
-  // Scroll to bottom on new messages
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, isTyping]);
 
-  async function send(e) {
-    e.preventDefault();
-    if (!text.trim() || sending) return;
-    const content = text.trim();
-    setText('');
-    setSending(true);
-
-    // Optimistic update
-    const temp = {
-      id: `temp-${Date.now()}`,
-      sender_id: profile.id,
-      content,
-      created_at: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, temp]);
-
+  async function init() {
+    setLoading(true);
     try {
-      await api.post(`/api/messages/${matchId}`, { content });
-    } catch (err) {
-      // Remove optimistic message on failure
-      setMessages((prev) => prev.filter((m) => m.id !== temp.id));
-      setText(content);
-      console.error(err.message);
-    } finally {
-      setSending(false);
-    }
+      const [msgs, match] = await Promise.all([
+        api.get(`/api/messages/${matchId}`),
+        api.get(`/api/matches`).then(ms => ms.find(m => m.id === matchId)),
+      ]);
+      setMessages(msgs || []);
+      if (match?.other_profile) setOther(match.other_profile);
+
+      // Mark as read
+      api.put(`/api/messages/${matchId}/read`).catch(() => {});
+
+      setupRealtime();
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); }
   }
 
-  if (loading) return (
-    <div className="h-full flex items-center justify-center">
-      <Spinner size={10} />
-    </div>
-  );
+  function setupRealtime() {
+    // Messages subscription
+    supabase.channel(`messages:${matchId}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `match_id=eq.${matchId}`,
+      }, payload => {
+        setMessages(prev => {
+          if (prev.find(m => m.id === payload.new.id)) return prev;
+          if (payload.new.sender_id !== user.id) {
+            api.put(`/api/messages/${matchId}/read`).catch(() => {});
+          }
+          return [...prev, payload.new];
+        });
+      })
+      .subscribe();
+
+    // Typing presence
+    const channel = supabase.channel(`typing:${matchId}`, {
+      config: { presence: { key: user.id } },
+    });
+
+    channel.on('presence', { event: 'sync' }, () => {
+      const state = channel.presenceState();
+      const others = Object.entries(state)
+        .filter(([key]) => key !== user.id)
+        .flatMap(([, arr]) => arr);
+      setIsTyping(others.some(o => o.typing));
+    });
+
+    channel.subscribe(async status => {
+      if (status === 'SUBSCRIBED') {
+        await channel.track({ typing: false });
+      }
+    });
+
+    presenceRef.current = channel;
+  }
+
+  function handleInput(e) {
+    setText(e.target.value);
+    if (!presenceRef.current) return;
+
+    presenceRef.current.track({ typing: true });
+    clearTimeout(typingTimeout.current);
+    typingTimeout.current = setTimeout(() => {
+      presenceRef.current?.track({ typing: false });
+    }, 1500);
+  }
+
+  async function send(e) {
+    e?.preventDefault();
+    if (!text.trim() || sending) return;
+    setSending(true);
+    const content = text.trim();
+    setText('');
+    presenceRef.current?.track({ typing: false });
+
+    try {
+      const msg = await api.post(`/api/messages/${matchId}`, { content });
+      setMessages(prev => prev.find(m => m.id === msg.id) ? prev : [...prev, msg]);
+    } catch (e) { console.error(e); setText(content); }
+    finally { setSending(false); }
+  }
+
+  async function blockUser() {
+    if (!other) return;
+    const reason = prompt('Reason for reporting (optional):');
+    if (!window.confirm(`Block ${other.name}? This will also remove your match.`)) return;
+    try {
+      await api.post('/api/blocks', { blocked_id: other.id, reason });
+      navigate('/matches');
+    } catch (e) { alert(e.message); }
+  }
+
+  function formatTime(ts) {
+    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  if (loading) return <div className="flex items-center justify-center h-screen"><Spinner /></div>;
 
   return (
-    <div className="h-full flex flex-col bg-slate-900">
+    <div className="flex flex-col h-screen max-w-lg mx-auto bg-white">
       {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 bg-slate-800 border-b border-slate-700 flex-shrink-0">
-        <button
-          onClick={() => navigate('/matches')}
-          className="text-slate-400 hover:text-white transition-colors p-1"
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-          </svg>
-        </button>
-
-        <div className="w-10 h-10 rounded-full overflow-hidden bg-slate-700 flex-shrink-0">
-          {other?.photos?.[0] ? (
-            <img src={other.photos[0]} alt={other.name} className="w-full h-full object-cover" />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-lg">👤</div>
-          )}
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 bg-white sticky top-0 z-10">
+        <button onClick={() => navigate('/matches')} className="text-gray-500 text-xl">←</button>
+        {other?.photos?.[0]
+          ? <img src={other.photos[0]} alt={other.name} className="w-10 h-10 rounded-full object-cover" />
+          : <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center">👤</div>
+        }
+        <div className="flex-1 min-w-0">
+          <p className="font-semibold text-gray-900 truncate">{other?.name || 'Match'}</p>
+          <p className="text-xs text-gray-400">{isTyping ? '✍️ typing...' : other?.age ? `${other.age} years old` : ''}</p>
         </div>
-
-        <div>
-          <p className="font-semibold text-white">{other?.name || 'Your match'}</p>
-          <p className="text-xs text-green-400">● Online</p>
+        <div className="relative">
+          <button onClick={() => setShowMenu(v => !v)} className="text-gray-400 text-xl px-2">⋮</button>
+          {showMenu && (
+            <div className="absolute right-0 top-8 bg-white rounded-xl shadow-lg border border-gray-100 py-1 w-44 z-20">
+              <button
+                onClick={() => { setShowMenu(false); blockUser(); }}
+                className="w-full text-left px-4 py-2.5 text-sm text-red-500 hover:bg-gray-50"
+              >🚫 Block & Report</button>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-2">
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
         {messages.length === 0 && (
-          <div className="text-center py-12">
-            <p className="text-4xl mb-3">👋</p>
-            <p className="text-slate-400">You matched! Say hello to {other?.name}.</p>
+          <div className="text-center py-12 text-gray-400">
+            <div className="text-4xl mb-2">💬</div>
+            <p className="text-sm">Say hello to {other?.name?.split(' ')[0] || 'your match'}!</p>
           </div>
         )}
 
-        {messages.map((msg) => {
-          const isMine = msg.sender_id === profile.id;
+        {messages.map((msg, i) => {
+          const mine    = msg.sender_id === user.id;
+          const isLast  = i === messages.length - 1;
+          const showTime = i === 0 || new Date(msg.created_at) - new Date(messages[i-1].created_at) > 300000;
+
           return (
-            <div key={msg.id} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
-              <div className="max-w-[78%]">
-                <div
-                  className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
-                    isMine
-                      ? 'bg-flame text-white rounded-br-sm'
-                      : 'bg-slate-700 text-slate-100 rounded-bl-sm'
-                  } ${msg.id.startsWith('temp') ? 'opacity-70' : ''}`}
-                >
+            <div key={msg.id}>
+              {showTime && (
+                <p className="text-center text-xs text-gray-400 my-2">{formatTime(msg.created_at)}</p>
+              )}
+              <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[75%] px-4 py-2 rounded-2xl text-sm ${
+                  mine
+                    ? 'bg-rose-500 text-white rounded-br-sm'
+                    : 'bg-gray-100 text-gray-800 rounded-bl-sm'
+                }`}>
                   {msg.content}
+                  {/* Read receipt */}
+                  {mine && isLast && (
+                    <span className="ml-2 text-xs opacity-70">
+                      {msg.read ? '✓✓' : '✓'}
+                    </span>
+                  )}
                 </div>
-                <p className={`text-xs text-slate-500 mt-1 ${isMine ? 'text-right' : 'text-left'}`}>
-                  {timeStr(msg.created_at)}
-                </p>
               </div>
             </div>
           );
         })}
 
+        {/* Typing indicator */}
+        {isTyping && (
+          <div className="flex justify-start">
+            <div className="bg-gray-100 rounded-2xl rounded-bl-sm px-4 py-3 flex gap-1">
+              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+            </div>
+          </div>
+        )}
+
         <div ref={bottomRef} />
       </div>
 
       {/* Input */}
-      <form
-        onSubmit={send}
-        className="flex items-end gap-2 p-4 bg-slate-800 border-t border-slate-700 flex-shrink-0"
-      >
-        <textarea
+      <form onSubmit={send} className="flex items-center gap-2 px-4 py-3 border-t border-gray-100 bg-white">
+        <input
           value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) send(e); }}
-          placeholder={`Message ${other?.name || ''}…`}
-          rows={1}
-          className="flex-1 input resize-none py-2.5 text-sm max-h-28"
-          style={{ overflow: 'hidden' }}
-          onInput={(e) => {
-            e.target.style.height = 'auto';
-            e.target.style.height = e.target.scrollHeight + 'px';
-          }}
+          onChange={handleInput}
+          onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send(e)}
+          placeholder="Message..."
+          className="flex-1 bg-gray-100 rounded-full px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-rose-300"
         />
         <button
           type="submit"
           disabled={!text.trim() || sending}
-          className="w-10 h-10 rounded-full bg-flame flex items-center justify-center flex-shrink-0 disabled:opacity-50 transition-all active:scale-90"
+          className="w-10 h-10 bg-rose-500 text-white rounded-full flex items-center justify-center disabled:opacity-40 hover:bg-rose-600 transition-colors"
         >
-          {sending ? (
-            <Spinner size={4} color="border-white" />
-          ) : (
-            <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-white">
-              <path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z" />
-            </svg>
-          )}
+          {sending ? '…' : '↑'}
         </button>
       </form>
     </div>

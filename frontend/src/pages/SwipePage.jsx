@@ -1,171 +1,229 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api';
-import SwipeCard from '../components/SwipeCard';
-import MatchModal from '../components/MatchModal';
 import Spinner from '../components/Spinner';
+import MatchModal from '../components/MatchModal';
+
+function timeAgo(ts) {
+  if (!ts) return '';
+  const diff = Date.now() - new Date(ts).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 2)  return '🟢 Online now';
+  if (mins < 60) return `Active ${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24)  return `Active ${hrs}h ago`;
+  return `Active ${Math.floor(hrs / 24)}d ago`;
+}
 
 export default function SwipePage() {
-  const [profiles, setProfiles] = useState([]);
-  const [loading, setLoading]   = useState(true);
-  const [error, setError]       = useState('');
-  const [match, setMatch]       = useState(null);
-  const [swiping, setSwiping]   = useState(false);
+  const [profiles, setProfiles]   = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [match, setMatch]         = useState(null);
+  const [lastSwipe, setLastSwipe] = useState(null);
+  const [anim, setAnim]           = useState(null); // 'left'|'right'|'super'
+  const [imgIndex, setImgIndex]   = useState(0);
+  const [dragging, setDragging]   = useState(false);
+  const [dragX, setDragX]         = useState(0);
+  const startX = useRef(0);
+  const cardRef = useRef(null);
 
-  const loadProfiles = useCallback(async () => {
-    setLoading(true); setError('');
+  useEffect(() => { load(); }, []);
+  useEffect(() => { setImgIndex(0); }, [profiles[0]?.id]);
+
+  async function load() {
+    setLoading(true);
+    try { setProfiles(await api.get('/api/profiles/discover')); }
+    catch (e) { console.error(e); }
+    finally { setLoading(false); }
+  }
+
+  async function swipe(direction) {
+    const profile = profiles[0];
+    if (!profile || anim) return;
+
+    setLastSwipe(profile);
+    setAnim(direction);
+
+    setTimeout(async () => {
+      setProfiles(p => p.slice(1));
+      setAnim(null);
+      setDragX(0);
+
+      try {
+        const res = await api.post('/api/swipes', { swiped_id: profile.id, direction });
+        if (res.match_id) setMatch({ profile, matchId: res.match_id });
+      } catch (e) { console.error(e); }
+    }, 350);
+  }
+
+  async function undo() {
+    if (!lastSwipe || anim) return;
     try {
-      const data = await api.get('/api/profiles/discover');
-      setProfiles(data);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { loadProfiles(); }, [loadProfiles]);
-
-  async function handleSwipe(direction) {
-    if (swiping || profiles.length === 0) return;
-    const top = profiles[profiles.length - 1];
-    setSwiping(true);
-
-    // Optimistically remove card
-    setProfiles((prev) => prev.slice(0, -1));
-
-    try {
-      const res = await api.post('/api/swipes', { swiped_id: top.id, direction });
-      if (res.match) setMatch(res.match);
-    } catch (err) {
-      console.error('Swipe failed:', err.message);
-      // Put card back on error
-      setProfiles((prev) => [...prev, top]);
-    } finally {
-      setSwiping(false);
-    }
-
-    // Reload when running low
-    if (profiles.length <= 3) loadProfiles();
+      const res = await api.delete('/api/swipes/last');
+      setProfiles(p => [res.profile || lastSwipe, ...p]);
+      setLastSwipe(null);
+    } catch (e) { alert(e.message); }
   }
 
-  const top = profiles[profiles.length - 1];
-  const second = profiles[profiles.length - 2];
-
-  if (loading && profiles.length === 0) {
-    return (
-      <div className="h-full flex flex-col items-center justify-center gap-4">
-        <Spinner size={10} />
-        <p className="text-slate-400">Finding people near you…</p>
-      </div>
-    );
+  // Drag handlers
+  function onMouseDown(e) { startX.current = e.clientX; setDragging(true); }
+  function onMouseMove(e) { if (dragging) setDragX(e.clientX - startX.current); }
+  function onMouseUp()    {
+    setDragging(false);
+    if (dragX > 80)       swipe('like');
+    else if (dragX < -80) swipe('dislike');
+    else                  setDragX(0);
   }
+  function onTouchStart(e) { startX.current = e.touches[0].clientX; setDragging(true); }
+  function onTouchMove(e)  { if (dragging) setDragX(e.touches[0].clientX - startX.current); }
+  function onTouchEnd()    { onMouseUp(); }
 
-  if (error) {
-    return (
-      <div className="h-full flex flex-col items-center justify-center p-6 gap-4 text-center">
-        <p className="text-4xl">😕</p>
-        <p className="text-slate-300">{error}</p>
-        <button onClick={loadProfiles} className="btn-primary">Retry</button>
-      </div>
-    );
-  }
+  const profile = profiles[0];
+  const photos  = profile?.photos?.filter(Boolean) || [];
 
-  if (profiles.length === 0) {
-    return (
-      <div className="h-full flex flex-col items-center justify-center p-6 gap-4 text-center">
-        <p className="text-6xl">🙈</p>
-        <h3 className="text-xl font-bold text-white">You've seen everyone!</h3>
-        <p className="text-slate-400">Check back later for new people.</p>
-        <button onClick={loadProfiles} className="btn-primary">Refresh</button>
-      </div>
-    );
-  }
+  const cardStyle = anim === 'right' ? { transform: 'translateX(120%) rotate(20deg)', opacity: 0, transition: 'all 0.35s ease' }
+                  : anim === 'left'  ? { transform: 'translateX(-120%) rotate(-20deg)', opacity: 0, transition: 'all 0.35s ease' }
+                  : anim === 'super' ? { transform: 'translateY(-120%)', opacity: 0, transition: 'all 0.35s ease' }
+                  : dragging         ? { transform: `translateX(${dragX}px) rotate(${dragX * 0.05}deg)`, transition: 'none' }
+                  : { transition: 'transform 0.2s ease' };
+
+  const likeOpacity    = Math.min(Math.max(dragX / 80, 0), 1);
+  const dislikeOpacity = Math.min(Math.max(-dragX / 80, 0), 1);
+
+  if (loading) return <div className="flex items-center justify-center h-screen"><Spinner /></div>;
 
   return (
-    <div className="h-full flex flex-col select-none">
-      {/* Header */}
-      <div className="flex items-center justify-between px-5 pt-5 pb-3">
-        <h1 className="text-2xl font-extrabold text-white flex items-center gap-2">
-          🔥 <span>Binder</span>
-        </h1>
-        <button onClick={loadProfiles} className="text-slate-400 hover:text-white transition-colors p-2">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-        </button>
-      </div>
+    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50 px-4 py-6 select-none">
+      {/* Stack */}
+      <div className="relative w-full max-w-sm" style={{ height: 520 }}>
+        {/* Background cards for stack effect */}
+        {profiles[2] && (
+          <div className="absolute inset-0 rounded-2xl bg-white shadow-sm"
+            style={{ transform: 'scale(0.92) translateY(16px)', zIndex: 1 }} />
+        )}
+        {profiles[1] && (
+          <div className="absolute inset-0 rounded-2xl bg-white shadow-md"
+            style={{ transform: 'scale(0.96) translateY(8px)', zIndex: 2 }} />
+        )}
 
-      {/* Card stack */}
-      <div className="flex-1 relative mx-4 mb-4">
-        {/* Back card */}
-        {second && (
+        {!profile ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center rounded-2xl bg-white shadow text-center p-8" style={{ zIndex: 3 }}>
+            <div className="text-5xl mb-4">🎉</div>
+            <p className="text-gray-600 font-medium">You've seen everyone!</p>
+            <p className="text-sm text-gray-400 mt-2">Check back later for new people</p>
+            <button onClick={load} className="mt-6 px-6 py-2 bg-rose-500 text-white rounded-full text-sm font-medium">
+              Refresh
+            </button>
+          </div>
+        ) : (
           <div
-            className="absolute inset-0 rounded-3xl overflow-hidden bg-slate-700 shadow-xl"
-            style={{ transform: 'scale(0.95) translateY(8px)', zIndex: 1 }}
+            ref={cardRef}
+            className="absolute inset-0 rounded-2xl overflow-hidden shadow-xl cursor-grab active:cursor-grabbing"
+            style={{ zIndex: 3, ...cardStyle }}
+            onMouseDown={onMouseDown}
+            onMouseMove={onMouseMove}
+            onMouseUp={onMouseUp}
+            onMouseLeave={() => { if (dragging) { setDragging(false); setDragX(0); } }}
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={onTouchEnd}
           >
-            <div className="w-full h-full">
-              {second.photos?.[0] ? (
-                <img src={second.photos[0]} alt="" className="w-full h-full object-cover opacity-60" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center bg-slate-700">
-                  <span className="text-6xl opacity-40">👤</span>
-                </div>
-              )}
+            {/* Photo */}
+            {photos.length > 0 ? (
+              <img
+                src={photos[imgIndex]}
+                alt={profile.name}
+                className="w-full h-full object-cover pointer-events-none"
+                draggable={false}
+              />
+            ) : (
+              <div className="w-full h-full bg-gradient-to-br from-rose-100 to-pink-200 flex items-center justify-center">
+                <span className="text-8xl">👤</span>
+              </div>
+            )}
+
+            {/* Photo dots */}
+            {photos.length > 1 && (
+              <div className="absolute top-3 left-0 right-0 flex gap-1 px-3">
+                {photos.map((_, i) => (
+                  <div
+                    key={i}
+                    className={`h-1 flex-1 rounded-full ${i === imgIndex ? 'bg-white' : 'bg-white/40'}`}
+                    onClick={e => { e.stopPropagation(); setImgIndex(i); }}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* Photo tap zones */}
+            {photos.length > 1 && (
+              <>
+                <div className="absolute left-0 top-0 w-1/2 h-full"
+                  onClick={e => { e.stopPropagation(); setImgIndex(i => Math.max(0, i - 1)); }} />
+                <div className="absolute right-0 top-0 w-1/2 h-full"
+                  onClick={e => { e.stopPropagation(); setImgIndex(i => Math.min(photos.length - 1, i + 1)); }} />
+              </>
+            )}
+
+            {/* Gradient overlay */}
+            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent pointer-events-none" />
+
+            {/* Like / Dislike stamps */}
+            <div className="absolute top-10 left-6 border-4 border-green-400 text-green-400 font-black text-3xl px-4 py-1 rounded-lg rotate-[-20deg] uppercase tracking-widest"
+              style={{ opacity: likeOpacity }}>Like</div>
+            <div className="absolute top-10 right-6 border-4 border-red-500 text-red-500 font-black text-3xl px-4 py-1 rounded-lg rotate-[20deg] uppercase tracking-widest"
+              style={{ opacity: dislikeOpacity }}>Nope</div>
+
+            {/* Profile info */}
+            <div className="absolute bottom-0 left-0 right-0 p-5 text-white pointer-events-none">
+              <div className="flex items-end gap-2">
+                <h2 className="text-2xl font-bold">{profile.name}, {profile.age}</h2>
+                {profile.verified && <span className="text-blue-400 text-xl mb-0.5">✓</span>}
+              </div>
+              {profile.location && <p className="text-sm text-white/80 mt-0.5">📍 {profile.location}</p>}
+              <p className="text-sm text-white/70 mt-0.5">{timeAgo(profile.last_active)}</p>
+              {profile.bio && <p className="text-sm text-white/90 mt-2 line-clamp-2">{profile.bio}</p>}
             </div>
           </div>
         )}
-
-        {/* Top card */}
-        {top && (
-          <div className="absolute inset-0" style={{ zIndex: 2 }}>
-            <SwipeCard
-              key={top.id}
-              profile={top}
-              onSwipe={handleSwipe}
-              isTop={true}
-            />
-          </div>
-        )}
       </div>
 
-      {/* Action buttons */}
-      <div className="flex items-center justify-center gap-6 pb-6">
+      {/* Buttons */}
+      <div className="flex items-center gap-5 mt-6">
+        {/* Undo */}
+        <button
+          onClick={undo}
+          disabled={!lastSwipe}
+          className="w-12 h-12 rounded-full bg-white shadow-md flex items-center justify-center text-yellow-400 text-xl disabled:opacity-30 hover:scale-110 transition-transform"
+        >↩</button>
+
         {/* Dislike */}
         <button
-          onClick={() => handleSwipe('dislike')}
-          disabled={swiping}
-          className="w-16 h-16 rounded-full bg-slate-800 border-2 border-red-400 flex items-center justify-center text-red-400 shadow-lg transition-all active:scale-90 hover:bg-red-400 hover:text-white disabled:opacity-50"
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="w-7 h-7">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+          onClick={() => swipe('dislike')}
+          className="w-16 h-16 rounded-full bg-white shadow-lg flex items-center justify-center text-red-500 text-3xl hover:scale-110 transition-transform"
+        >✕</button>
 
-        {/* Super Like */}
+        {/* Super like */}
         <button
-          onClick={() => handleSwipe('like')}
-          disabled={swiping}
-          className="w-12 h-12 rounded-full bg-slate-800 border-2 border-blue-400 flex items-center justify-center text-blue-400 shadow-lg transition-all active:scale-90 hover:bg-blue-400 hover:text-white disabled:opacity-50"
-        >
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-            <path d="M11.645 20.91l-.007-.003-.022-.012a15.247 15.247 0 01-.383-.218 25.18 25.18 0 01-4.244-3.17C4.688 15.36 2.25 12.174 2.25 8.25 2.25 5.322 4.714 3 7.688 3A5.5 5.5 0 0112 5.052 5.5 5.5 0 0116.313 3c2.973 0 5.437 2.322 5.437 5.25 0 3.925-2.438 7.111-4.739 9.256a25.175 25.175 0 01-4.244 3.17 15.247 15.247 0 01-.383.219l-.022.012-.007.004-.003.001a.752.752 0 01-.704 0l-.003-.001z" />
-          </svg>
-        </button>
+          onClick={() => swipe('superlike')}
+          className="w-12 h-12 rounded-full bg-white shadow-md flex items-center justify-center text-blue-500 text-2xl hover:scale-110 transition-transform"
+        >★</button>
 
         {/* Like */}
         <button
-          onClick={() => handleSwipe('like')}
-          disabled={swiping}
-          className="w-16 h-16 rounded-full bg-slate-800 border-2 border-green-400 flex items-center justify-center text-green-400 shadow-lg transition-all active:scale-90 hover:bg-green-400 hover:text-white disabled:opacity-50"
-        >
-          <svg viewBox="0 0 24 24" fill="currentColor" className="w-7 h-7">
-            <path d="M11.645 20.91l-.007-.003-.022-.012a15.247 15.247 0 01-.383-.218 25.18 25.18 0 01-4.244-3.17C4.688 15.36 2.25 12.174 2.25 8.25 2.25 5.322 4.714 3 7.688 3A5.5 5.5 0 0112 5.052 5.5 5.5 0 0116.313 3c2.973 0 5.437 2.322 5.437 5.25 0 3.925-2.438 7.111-4.739 9.256a25.175 25.175 0 01-4.244 3.17 15.247 15.247 0 01-.383.219l-.022.012-.007.004-.003.001a.752.752 0 01-.704 0l-.003-.001z" />
-          </svg>
-        </button>
+          onClick={() => swipe('like')}
+          className="w-16 h-16 rounded-full bg-white shadow-lg flex items-center justify-center text-rose-500 text-3xl hover:scale-110 transition-transform"
+        >♥</button>
       </div>
 
-      {/* Match modal */}
-      {match && <MatchModal match={match} onClose={() => setMatch(null)} />}
+      <p className="text-xs text-gray-400 mt-4">{profiles.length} profiles remaining</p>
+
+      {match && (
+        <MatchModal
+          profile={match.profile}
+          matchId={match.matchId}
+          onClose={() => setMatch(null)}
+        />
+      )}
     </div>
   );
 }
