@@ -15,7 +15,7 @@ router.get('/:matchId', requireAuth, async (req, res) => {
     .select('id')
     .eq('id', matchId)
     .or(`user1_id.eq.${userId},user2_id.eq.${userId}`)
-    .maybeSingle();
+    .single();
 
   if (!match) return res.status(403).json({ error: 'Not a member of this match' });
 
@@ -42,7 +42,7 @@ router.post('/:matchId', requireAuth, async (req, res) => {
     .select('id')
     .eq('id', matchId)
     .or(`user1_id.eq.${userId},user2_id.eq.${userId}`)
-    .maybeSingle();
+    .single();
 
   if (!match) return res.status(403).json({ error: 'Not a member of this match' });
 

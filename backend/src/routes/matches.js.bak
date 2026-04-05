@@ -30,7 +30,7 @@ router.get('/', requireAuth, async (req, res) => {
         .eq('match_id', m.id)
         .order('created_at', { ascending: false })
         .limit(1)
-        .maybeSingle(),
+        .single(),
 
       supabase.from('messages')
         .select('id', { count: 'exact', head: true })
