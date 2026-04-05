@@ -5,93 +5,76 @@ import { api } from '../lib/api';
 import Spinner from '../components/Spinner';
 
 const GENDERS = ['man', 'woman', 'nonbinary', 'other'];
-
-const STEPS = ['basics', 'about', 'photos', 'prefs'];
+const STEPS   = ['basics', 'about', 'photos', 'prefs'];
 
 export default function SetupPage() {
   const { refreshProfile } = useAuth();
   const navigate = useNavigate();
 
-  const [step, setStep] = useState(0);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-
-  // Form state
-  const [name, setName]         = useState('');
-  const [age, setAge]           = useState('');
-  const [gender, setGender]     = useState('');
-  const [bio, setBio]           = useState('');
-  const [location, setLocation] = useState('');
-  const [photos, setPhotos]     = useState([]);
-  const [interested, setInterested] = useState(['man', 'woman', 'nonbinary', 'other']);
-  const [minAge, setMinAge]     = useState(18);
-  const [maxAge, setMaxAge]     = useState(60);
-  const [uploading, setUploading] = useState(false);
+  const [step, setStep]             = useState(0);
+  const [busy, setBusy]             = useState(false);
+  const [error, setError]           = useState('');
+  const [name, setName]             = useState('');
+  const [age, setAge]               = useState('');
+  const [gender, setGender]         = useState('');
+  const [bio, setBio]               = useState('');
+  const [location, setLocation]     = useState('');
+  const [photos, setPhotos]         = useState([]);
+  const [interested, setInterested] = useState(['man','woman','nonbinary','other']);
+  const [minAge, setMinAge]         = useState(18);
+  const [maxAge, setMaxAge]         = useState(60);
+  const [uploading, setUploading]   = useState(false);
 
   function toggleInterest(g) {
-    setInterested((prev) =>
-      prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g]
-    );
+    setInterested(prev => prev.includes(g) ? prev.filter(x => x !== g) : [...prev, g]);
   }
 
   async function handlePhotoUpload(e) {
     const file = e.target.files[0];
     if (!file) return;
     if (photos.length >= 6) { setError('Max 6 photos'); return; }
-    setUploading(true);
-    setError('');
+    setUploading(true); setError('');
     try {
       const url = await api.uploadPhoto(file);
-      setPhotos((p) => [...p, url]);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setUploading(false);
-    }
-  }
-
-  function removePhoto(i) {
-    setPhotos((p) => p.filter((_, idx) => idx !== i));
+      setPhotos(p => [...p, url]);
+    } catch (err) { setError(err.message); }
+    finally { setUploading(false); }
   }
 
   function canNext() {
     if (step === 0) return name.trim() && age && gender;
-    if (step === 1) return true;
     if (step === 2) return photos.length > 0;
     if (step === 3) return interested.length > 0;
     return true;
   }
 
   async function handleNext() {
-    if (step < STEPS.length - 1) { setStep((s) => s + 1); return; }
-    // Final submit
+    if (step < STEPS.length - 1) { setStep(s => s + 1); return; }
     setError(''); setBusy(true);
     try {
-      await api.post('/api/profiles', {
-        name: name.trim(),
-        age: parseInt(age),
+      // FIX: was /api/profiles (wrong), now /api/profiles/me with PUT
+      await api.put('/api/profiles/me', {
+        name:         name.trim(),
+        age:          parseInt(age),
         gender,
-        bio: bio.trim(),
-        location: location.trim(),
+        bio:          bio.trim(),
+        location:     location.trim(),
         photos,
         interested_in: interested,
-        min_age: minAge,
-        max_age: maxAge,
+        min_age:      minAge,
+        max_age:      maxAge,
+        is_setup:     true,
       });
       await refreshProfile();
       navigate('/swipe');
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
+    } catch (err) { setError(err.message); }
+    finally { setBusy(false); }
   }
 
   const progress = ((step + 1) / STEPS.length) * 100;
 
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col max-w-md mx-auto p-6">
-      {/* Header */}
       <div className="mb-8">
         <div className="flex items-center gap-3 mb-6">
           <span className="text-3xl">🔥</span>
@@ -99,39 +82,28 @@ export default function SetupPage() {
         </div>
         <p className="text-slate-400 text-sm mb-3">Step {step + 1} of {STEPS.length}</p>
         <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-flame rounded-full transition-all duration-500"
-            style={{ width: `${progress}%` }}
-          />
+          <div className="h-full bg-rose-500 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
         </div>
       </div>
 
-      {/* Steps */}
       <div className="flex-1">
         {step === 0 && (
-          <div className="animate-slide-up space-y-5">
+          <div className="space-y-5">
             <h2 className="text-2xl font-bold text-white">The basics</h2>
             <div>
-              <label className="label">Your name</label>
-              <input className="input" placeholder="e.g. Alex" value={name} onChange={(e) => setName(e.target.value)} />
+              <label className="text-slate-400 text-sm block mb-1">Your name</label>
+              <input className="w-full bg-slate-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-rose-500" placeholder="e.g. Alex" value={name} onChange={e => setName(e.target.value)} />
             </div>
             <div>
-              <label className="label">Age</label>
-              <input className="input" type="number" min="18" max="120" placeholder="18+" value={age} onChange={(e) => setAge(e.target.value)} />
+              <label className="text-slate-400 text-sm block mb-1">Age</label>
+              <input className="w-full bg-slate-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-rose-500" type="number" min="18" placeholder="18+" value={age} onChange={e => setAge(e.target.value)} />
             </div>
             <div>
-              <label className="label">I am a…</label>
+              <label className="text-slate-400 text-sm block mb-1">I am a…</label>
               <div className="grid grid-cols-2 gap-2 mt-1">
-                {GENDERS.map((g) => (
-                  <button
-                    key={g}
-                    onClick={() => setGender(g)}
-                    className={`py-3 rounded-xl border font-medium capitalize transition-colors ${
-                      gender === g
-                        ? 'bg-flame border-flame text-white'
-                        : 'border-slate-600 text-slate-300 hover:border-slate-400'
-                    }`}
-                  >
+                {GENDERS.map(g => (
+                  <button key={g} onClick={() => setGender(g)}
+                    className={`py-3 rounded-xl border font-medium capitalize transition-colors ${gender === g ? 'bg-rose-500 border-rose-500 text-white' : 'border-slate-600 text-slate-300'}`}>
                     {g}
                   </button>
                 ))}
@@ -141,59 +113,37 @@ export default function SetupPage() {
         )}
 
         {step === 1 && (
-          <div className="animate-slide-up space-y-5">
+          <div className="space-y-5">
             <h2 className="text-2xl font-bold text-white">About you</h2>
             <div>
-              <label className="label">Bio <span className="text-slate-500">(optional)</span></label>
-              <textarea
-                className="input min-h-[120px] resize-none"
-                placeholder="Tell people something interesting about yourself…"
-                value={bio}
-                onChange={(e) => setBio(e.target.value)}
-                maxLength={300}
-              />
+              <label className="text-slate-400 text-sm block mb-1">Bio <span className="text-slate-500">(optional)</span></label>
+              <textarea className="w-full bg-slate-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-rose-500 min-h-[120px] resize-none"
+                placeholder="Tell people something interesting…" value={bio} onChange={e => setBio(e.target.value)} maxLength={300} />
               <p className="text-xs text-slate-500 mt-1 text-right">{bio.length}/300</p>
             </div>
             <div>
-              <label className="label">Location <span className="text-slate-500">(optional)</span></label>
-              <input className="input" placeholder="e.g. Nairobi, Kenya" value={location} onChange={(e) => setLocation(e.target.value)} />
+              <label className="text-slate-400 text-sm block mb-1">Location <span className="text-slate-500">(optional)</span></label>
+              <input className="w-full bg-slate-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-rose-500" placeholder="e.g. Nairobi, Kenya" value={location} onChange={e => setLocation(e.target.value)} />
             </div>
           </div>
         )}
 
         {step === 2 && (
-          <div className="animate-slide-up space-y-5">
+          <div className="space-y-5">
             <h2 className="text-2xl font-bold text-white">Add photos</h2>
-            <p className="text-slate-400 text-sm">Add at least 1 photo. Up to 6.</p>
-
+            <p className="text-slate-400 text-sm">At least 1 photo. Up to 6.</p>
             <div className="grid grid-cols-3 gap-2">
               {photos.map((url, i) => (
                 <div key={i} className="relative aspect-square rounded-xl overflow-hidden bg-slate-700">
-                  <img src={url} alt="" className="w-full h-full object-cover" />
-                  <button
-                    onClick={() => removePhoto(i)}
-                    className="absolute top-1 right-1 w-6 h-6 bg-black/70 rounded-full flex items-center justify-center text-white text-xs hover:bg-red-600 transition-colors"
-                  >
-                    ✕
-                  </button>
-                  {i === 0 && (
-                    <div className="absolute bottom-1 left-1 bg-flame text-white text-[10px] px-1.5 py-0.5 rounded-full font-semibold">
-                      Main
-                    </div>
-                  )}
+                  <img src={url} alt="" className="w-full h-full object-cover" loading="lazy" />
+                  <button onClick={() => setPhotos(p => p.filter((_, idx) => idx !== i))}
+                    className="absolute top-1 right-1 w-6 h-6 bg-black/70 rounded-full flex items-center justify-center text-white text-xs">✕</button>
+                  {i === 0 && <div className="absolute bottom-1 left-1 bg-rose-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-semibold">Main</div>}
                 </div>
               ))}
-
               {photos.length < 6 && (
-                <label className="aspect-square rounded-xl border-2 border-dashed border-slate-600 flex flex-col items-center justify-center cursor-pointer hover:border-flame transition-colors bg-slate-800">
-                  {uploading ? (
-                    <Spinner size={6} />
-                  ) : (
-                    <>
-                      <span className="text-2xl text-slate-400">+</span>
-                      <span className="text-xs text-slate-500 mt-1">Add photo</span>
-                    </>
-                  )}
+                <label className="aspect-square rounded-xl border-2 border-dashed border-slate-600 flex flex-col items-center justify-center cursor-pointer hover:border-rose-500 bg-slate-800 transition-colors">
+                  {uploading ? <Spinner size={6} /> : <><span className="text-2xl text-slate-400">+</span><span className="text-xs text-slate-500 mt-1">Add photo</span></>}
                   <input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} disabled={uploading} />
                 </label>
               )}
@@ -202,48 +152,29 @@ export default function SetupPage() {
         )}
 
         {step === 3 && (
-          <div className="animate-slide-up space-y-6">
+          <div className="space-y-6">
             <h2 className="text-2xl font-bold text-white">Your preferences</h2>
-
             <div>
-              <label className="label">I'm interested in…</label>
-              <div className="grid grid-cols-2 gap-2 mt-1">
-                {GENDERS.map((g) => (
-                  <button
-                    key={g}
-                    onClick={() => toggleInterest(g)}
-                    className={`py-3 rounded-xl border font-medium capitalize transition-colors ${
-                      interested.includes(g)
-                        ? 'bg-flame border-flame text-white'
-                        : 'border-slate-600 text-slate-300 hover:border-slate-400'
-                    }`}
-                  >
+              <label className="text-slate-400 text-sm block mb-2">I'm interested in…</label>
+              <div className="grid grid-cols-2 gap-2">
+                {GENDERS.map(g => (
+                  <button key={g} onClick={() => toggleInterest(g)}
+                    className={`py-3 rounded-xl border font-medium capitalize transition-colors ${interested.includes(g) ? 'bg-rose-500 border-rose-500 text-white' : 'border-slate-600 text-slate-300'}`}>
                     {g}
                   </button>
                 ))}
               </div>
             </div>
-
             <div>
-              <label className="label">Age range: {minAge} – {maxAge}</label>
-              <div className="space-y-3 mt-2">
+              <label className="text-slate-400 text-sm block mb-2">Age range: {minAge} – {maxAge}</label>
+              <div className="space-y-3">
                 <div>
-                  <p className="text-xs text-slate-500 mb-1">Min age: {minAge}</p>
-                  <input
-                    type="range" min="18" max="80"
-                    value={minAge}
-                    onChange={(e) => { const v = +e.target.value; setMinAge(v); if (v > maxAge) setMaxAge(v); }}
-                    className="w-full accent-flame"
-                  />
+                  <p className="text-xs text-slate-500 mb-1">Min: {minAge}</p>
+                  <input type="range" min="18" max="80" value={minAge} onChange={e => { const v = +e.target.value; setMinAge(v); if (v > maxAge) setMaxAge(v); }} className="w-full accent-rose-500" />
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500 mb-1">Max age: {maxAge}</p>
-                  <input
-                    type="range" min="18" max="99"
-                    value={maxAge}
-                    onChange={(e) => { const v = +e.target.value; setMaxAge(v); if (v < minAge) setMinAge(v); }}
-                    className="w-full accent-flame"
-                  />
+                  <p className="text-xs text-slate-500 mb-1">Max: {maxAge}</p>
+                  <input type="range" min="18" max="99" value={maxAge} onChange={e => { const v = +e.target.value; setMaxAge(v); if (v < minAge) setMinAge(v); }} className="w-full accent-rose-500" />
                 </div>
               </div>
             </div>
@@ -251,26 +182,13 @@ export default function SetupPage() {
         )}
       </div>
 
-      {/* Error */}
-      {error && (
-        <div className="mt-4 p-3 bg-red-500/20 border border-red-500/40 text-red-300 rounded-xl text-sm">
-          {error}
-        </div>
-      )}
+      {error && <div className="mt-4 p-3 bg-red-500/20 border border-red-500/40 text-red-300 rounded-xl text-sm">{error}</div>}
 
-      {/* Navigation */}
       <div className="mt-8 flex gap-3">
-        {step > 0 && (
-          <button onClick={() => setStep((s) => s - 1)} className="btn-ghost flex-1">
-            Back
-          </button>
-        )}
-        <button
-          onClick={handleNext}
-          disabled={!canNext() || busy || uploading}
-          className="btn-primary flex-1"
-        >
-          {busy ? <Spinner size={5} color="border-white" /> : step === STEPS.length - 1 ? 'Let\'s go 🔥' : 'Next'}
+        {step > 0 && <button onClick={() => setStep(s => s - 1)} className="flex-1 py-3 rounded-xl border border-slate-600 text-slate-300">Back</button>}
+        <button onClick={handleNext} disabled={!canNext() || busy || uploading}
+          className="flex-1 py-3 rounded-xl bg-rose-500 text-white font-semibold disabled:opacity-40">
+          {busy ? <Spinner size={5} /> : step === STEPS.length - 1 ? "Let's go 🔥" : 'Next'}
         </button>
       </div>
     </div>
