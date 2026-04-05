@@ -17,7 +17,11 @@ router.get('/me', requireAuth, async (req, res) => {
 
 // PUT /api/profiles/me
 router.put('/me', requireAuth, async (req, res) => {
-  const allowed = ['name','age','bio','gender','interested_in','min_age','max_age','photos','location','is_setup'];
+  const allowed = [
+    'name','age','bio','gender','interested_in','min_age','max_age',
+    'photos','location','is_setup','interests','prompts',
+    'latitude','longitude','max_distance',
+  ];
   const updates = { id: req.user.id };
   for (const key of allowed) {
     if (req.body[key] !== undefined) updates[key] = req.body[key];
@@ -40,12 +44,10 @@ router.get('/discover', requireAuth, async (req, res) => {
   const { data: me } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
   if (!me) return res.status(404).json({ error: 'Profile not found' });
 
-  // Users I already swiped
   const { data: mySwipes } = await supabase.from('swipes').select('swiped_id').eq('swiper_id', userId);
   const swiped = (mySwipes || []).map(s => s.swiped_id);
 
-  // Users who blocked me or I blocked
-  const { data: myBlocks }   = await supabase.from('blocks').select('blocked_id').eq('blocker_id', userId);
+  const { data: myBlocks }    = await supabase.from('blocks').select('blocked_id').eq('blocker_id', userId);
   const { data: blockedByMe } = await supabase.from('blocks').select('blocker_id').eq('blocked_id', userId);
   const blocked = [
     ...(myBlocks    || []).map(b => b.blocked_id),
@@ -56,7 +58,7 @@ router.get('/discover', requireAuth, async (req, res) => {
 
   let query = supabase
     .from('profiles')
-    .select('id,name,age,bio,gender,photos,location,verified,last_active,is_setup')
+    .select('id,name,age,bio,gender,photos,location,verified,last_active,is_setup,interests,prompts,created_at,latitude,longitude')
     .eq('is_setup', true)
     .contains('interested_in', [me.gender])
     .gte('age', me.min_age)
@@ -67,9 +69,9 @@ router.get('/discover', requireAuth, async (req, res) => {
     query = query.not('id', 'in', `(${exclude.join(',')})`);
   }
 
-  // Boosted profiles first
-  query = query.order('boost_until', { ascending: false, nullsFirst: false })
-               .order('last_active', { ascending: false });
+  query = query
+    .order('boost_until', { ascending: false, nullsFirst: false })
+    .order('last_active', { ascending: false });
 
   const { data, error } = await query;
   if (error) return res.status(400).json({ error: error.message });
@@ -80,7 +82,7 @@ router.get('/discover', requireAuth, async (req, res) => {
 router.get('/:id', requireAuth, async (req, res) => {
   const { data, error } = await supabase
     .from('profiles')
-    .select('id,name,age,bio,gender,photos,location,verified,last_active')
+    .select('id,name,age,bio,gender,photos,location,verified,last_active,interests,prompts,created_at')
     .eq('id', req.params.id)
     .maybeSingle();
   if (error || !data) return res.status(404).json({ error: 'Profile not found' });
