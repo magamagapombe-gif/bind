@@ -18,14 +18,32 @@ router.get('/:matchId', requireAuth, async (req, res) => {
 
   if (!match) return res.status(403).json({ error: 'Not a member of this match' });
 
-  const { data, error } = await supabase
+  // Try fetching with reactions join — fall back to plain messages if table doesn't exist yet
+  let data, error;
+  ({ data, error } = await supabase
     .from('messages')
     .select('*, message_reactions(id, user_id, emoji)')
     .eq('match_id', matchId)
-    .order('created_at', { ascending: true });
+    .order('created_at', { ascending: true }));
+
+  if (error) {
+    // message_reactions table may not exist yet — fall back to plain select
+    ({ data, error } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('match_id', matchId)
+      .order('created_at', { ascending: true }));
+  }
 
   if (error) return res.status(400).json({ error: error.message });
-  res.json(data);
+
+  // Normalise: ensure message_reactions always present
+  const normalised = (data || []).map(m => ({
+    ...m,
+    message_reactions: m.message_reactions || [],
+  }));
+
+  res.json(normalised);
 });
 
 // POST /api/messages/:matchId
@@ -45,19 +63,33 @@ router.post('/:matchId', requireAuth, async (req, res) => {
 
   if (!match) return res.status(403).json({ error: 'Not a member of this match' });
 
-  const { data, error } = await supabase
+  // Build insert — only include gif_url if column exists (try/catch handles it)
+  const insertPayload = {
+    match_id:  matchId,
+    sender_id: userId,
+    content:   content?.trim() || '',
+  };
+  if (gif_url) insertPayload.gif_url = gif_url;
+
+  let data, error;
+  ({ data, error } = await supabase
     .from('messages')
-    .insert({
-      match_id: matchId,
-      sender_id: userId,
-      content: content?.trim() || '',
-      gif_url: gif_url || null,
-    })
+    .insert(insertPayload)
     .select()
-    .maybeSingle();
+    .maybeSingle());
+
+  if (error && gif_url && error.message.includes('gif_url')) {
+    // gif_url column not added yet — insert without it
+    delete insertPayload.gif_url;
+    ({ data, error } = await supabase
+      .from('messages')
+      .insert(insertPayload)
+      .select()
+      .maybeSingle());
+  }
 
   if (error) return res.status(400).json({ error: error.message });
-  res.json(data);
+  res.json({ ...data, message_reactions: [] });
 });
 
 // PUT /api/messages/:matchId/read
@@ -83,28 +115,26 @@ router.post('/:messageId/react', requireAuth, async (req, res) => {
 
   if (!emoji) return res.status(400).json({ error: 'Emoji required' });
 
-  // Check if already reacted — toggle off
   const { data: existing } = await supabase
     .from('message_reactions')
     .select('id, emoji')
     .eq('message_id', messageId)
     .eq('user_id', userId)
-    .maybeSingle();
+    .maybeSingle()
+    .catch(() => ({ data: null }));
 
   if (existing) {
     if (existing.emoji === emoji) {
-      // Same emoji — remove reaction
       await supabase.from('message_reactions').delete().eq('id', existing.id);
       return res.json({ removed: true });
     } else {
-      // Different emoji — update
       const { data } = await supabase
         .from('message_reactions')
         .update({ emoji })
         .eq('id', existing.id)
         .select()
         .maybeSingle();
-      return res.json(data);
+      return res.json(data || {});
     }
   }
 
@@ -112,10 +142,11 @@ router.post('/:messageId/react', requireAuth, async (req, res) => {
     .from('message_reactions')
     .insert({ message_id: messageId, user_id: userId, emoji })
     .select()
-    .maybeSingle();
+    .maybeSingle()
+    .catch(e => ({ data: null, error: e }));
 
   if (error) return res.status(400).json({ error: error.message });
-  res.json(data);
+  res.json(data || {});
 });
 
 export default router;

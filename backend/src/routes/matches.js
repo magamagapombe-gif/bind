@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase.js';
 
 const router = express.Router();
 
-// GET /api/matches — with other profile, last message, and unread count
+// GET /api/matches
 router.get('/', requireAuth, async (req, res) => {
   const userId = req.user.id;
 
@@ -39,19 +39,23 @@ router.get('/', requireAuth, async (req, res) => {
         .eq('read', false),
     ]);
 
+    // Skip matches where the other profile no longer exists
+    if (!profileRes.data) return null;
+
     return {
       ...m,
-      other_profile:  profileRes.data,
-      last_message:   lastMsgRes.data?.content || null,
+      other_profile:   profileRes.data,
+      last_message:    lastMsgRes.data?.content || null,
       last_message_at: lastMsgRes.data?.created_at || m.created_at,
-      unread_count:   unreadRes.count || 0,
+      unread_count:    unreadRes.count || 0,
     };
   }));
 
-  // Sort by most recent message
-  enriched.sort((a, b) => new Date(b.last_message_at) - new Date(a.last_message_at));
+  // Filter out nulls (deleted profiles) and sort by most recent message
+  const valid = enriched.filter(Boolean);
+  valid.sort((a, b) => new Date(b.last_message_at) - new Date(a.last_message_at));
 
-  res.json(enriched);
+  res.json(valid);
 });
 
 export default router;
