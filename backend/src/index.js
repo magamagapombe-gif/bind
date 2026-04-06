@@ -4,12 +4,13 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 
-import profilesRouter  from './routes/profiles.js';
-import swipesRouter    from './routes/swipes.js';
-import matchesRouter   from './routes/matches.js';
-import messagesRouter  from './routes/messages.js';
-import uploadRouter    from './routes/upload.js';
-import blocksRouter    from './routes/blocks.js';
+import profilesRouter from './routes/profiles.js';
+import swipesRouter   from './routes/swipes.js';
+import matchesRouter  from './routes/matches.js';
+import messagesRouter from './routes/messages.js';
+import uploadRouter   from './routes/upload.js';
+import blocksRouter   from './routes/blocks.js';
+import callsRouter    from './routes/calls.js';
 
 dotenv.config();
 
@@ -33,6 +34,7 @@ app.use('/api/matches',  matchesRouter);
 app.use('/api/messages', messagesRouter);
 app.use('/api/upload',   uploadRouter);
 app.use('/api/blocks',   blocksRouter);
+app.use('/api/calls',    callsRouter);
 
 app.use((_, res) => res.status(404).json({ error: 'Route not found' }));
 app.use((err, _, res, __) => { console.error(err); res.status(500).json({ error: err.message }); });

@@ -77,7 +77,7 @@ begin
     select 1 from swipes
     where swiper_id = p_swiped
       and swiped_id = p_swiper
-      and direction in ('like', 'superlike')
+      and direction = 'like'
   ) then
     -- Create match (order IDs so unique constraint works)
     insert into matches (user1_id, user2_id)

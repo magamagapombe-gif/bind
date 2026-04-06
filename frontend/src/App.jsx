@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { CallProvider } from './context/CallContext';
 
 import AuthPage    from './pages/AuthPage';
 import SetupPage   from './pages/SetupPage';
@@ -35,33 +36,14 @@ function AppRoutes() {
 
   return (
     <Routes>
-      <Route
-        path="/auth"
-        element={session ? <Navigate to={profile?.is_setup ? '/swipe' : '/setup'} replace /> : <AuthPage />}
-      />
-      <Route
-        path="/setup"
-        element={
-          <PrivateRoute>
-            <SetupPage />
-          </PrivateRoute>
-        }
-      />
-      <Route
-        path="/"
-        element={
-          <PrivateRoute>
-            <SetupGuard>
-              <Layout />
-            </SetupGuard>
-          </PrivateRoute>
-        }
-      >
+      <Route path="/auth" element={session ? <Navigate to={profile?.is_setup ? '/swipe' : '/setup'} replace /> : <AuthPage />} />
+      <Route path="/setup" element={<PrivateRoute><SetupPage /></PrivateRoute>} />
+      <Route path="/" element={<PrivateRoute><SetupGuard><Layout /></SetupGuard></PrivateRoute>}>
         <Route index element={<Navigate to="/swipe" replace />} />
-        <Route path="swipe"   element={<SwipePage />} />
-        <Route path="matches" element={<MatchesPage />} />
-        <Route path="chat/:matchId" element={<ChatPage />} />
-        <Route path="profile" element={<ProfilePage />} />
+        <Route path="swipe"            element={<SwipePage />} />
+        <Route path="matches"          element={<MatchesPage />} />
+        <Route path="chat/:matchId"    element={<ChatPage />} />
+        <Route path="profile"          element={<ProfilePage />} />
       </Route>
       <Route path="*" element={<Navigate to="/auth" replace />} />
     </Routes>
@@ -72,7 +54,10 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
-        <AppRoutes />
+        {/* CallProvider must be inside AuthProvider (needs user) but outside routes (needs to render over everything) */}
+        <CallProvider>
+          <AppRoutes />
+        </CallProvider>
       </BrowserRouter>
     </AuthProvider>
   );
