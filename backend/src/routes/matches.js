@@ -23,7 +23,7 @@ router.get('/', requireAuth, async (req, res) => {
       supabase.from('profiles')
         .select('id, name, age, photos, last_active, verified')
         .eq('id', otherId)
-        .single(),
+        .maybeSingle(),
 
       supabase.from('messages')
         .select('content, created_at, sender_id, read')

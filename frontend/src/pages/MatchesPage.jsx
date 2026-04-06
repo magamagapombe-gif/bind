@@ -71,8 +71,8 @@ export default function MatchesPage() {
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-3">
-              {matches.map(m => {
-                const other  = m.other_profile || {};
+              {matches.filter(m => m.other_profile?.id).map(m => {
+                const other  = m.other_profile;
                 const photo  = other.photos?.[0];
                 const online = other.last_active && (Date.now() - new Date(other.last_active).getTime()) < 300000;
                 return (

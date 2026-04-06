@@ -50,7 +50,7 @@ export default function ChatPage() {
       ]);
       setMessages(msgs || []);
       const match = allMatches?.find(m => m.id === matchId);
-      if (match?.other_profile) setOther(match.other_profile);
+      if (match?.other_profile?.id) setOther(match.other_profile);
       api.put(`/api/messages/${matchId}/read`).catch(() => {});
       setupRealtime();
     } catch (e) { console.error(e); }

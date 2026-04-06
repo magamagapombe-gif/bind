@@ -22,3 +22,8 @@ CREATE POLICY "calls_member" ON calls FOR ALL
 
 -- Realtime for calls
 ALTER PUBLICATION supabase_realtime ADD TABLE calls;
+
+-- Fix: allow age to be NULL temporarily during profile setup
+-- (age is required by the app UI before is_setup=true, but must not crash on partial upsert)
+ALTER TABLE profiles ALTER COLUMN age DROP NOT NULL;
+ALTER TABLE profiles ALTER COLUMN name DROP NOT NULL;

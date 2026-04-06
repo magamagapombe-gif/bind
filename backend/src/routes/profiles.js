@@ -11,7 +11,12 @@ router.get('/me', requireAuth, async (req, res) => {
     .select('*')
     .eq('id', req.user.id)
     .maybeSingle();
-  if (error || !data) return res.status(404).json({ error: 'Profile not found' });
+
+  if (error) return res.status(400).json({ error: error.message });
+
+  // Return a shell profile if no row yet — frontend will redirect to /setup
+  if (!data) return res.json({ id: req.user.id, is_setup: false });
+
   res.json(data);
 });
 
